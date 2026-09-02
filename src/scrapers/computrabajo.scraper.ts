@@ -4,7 +4,7 @@ import axios from 'axios';
 import * as cheerio from 'cheerio';
 import * as crypto from 'crypto';
 import { Job } from '../common/job.interface';
-import { parseRelativeDate } from '../common/date-parsing';
+import { extractRelativeDate } from '../common/date-utils';
 
 const DOMAINS: Record<string, string> = {
   mx: 'www.computrabajo.com.mx',
@@ -48,14 +48,10 @@ export class ComputrabajoScraper {
         const location = $(el).find('p.fs13').first().text().trim() || country.toUpperCase();
         const id = crypto.createHash('md5').update(href).digest('hex').slice(0, 12);
 
-        let postedAt: Date | undefined;
-        $(el)
-          .find('p.fs13, span.fs13, time, .fc_aux')
-          .each((__, dateEl) => {
-            if (postedAt) return;
-            postedAt = parseRelativeDate($(dateEl).text().trim());
-          });
-        if (!postedAt) postedAt = parseRelativeDate($(el).text());
+        // Mejor esfuerzo: busca "Hace X días/horas" en todo el texto de la
+        // tarjeta (más robusto que un selector fijo, que puede no existir).
+        const cardText = $(el).text();
+        const detectedDate = extractRelativeDate(cardText);
 
         jobs.push({
           id: `computrabajo-${id}`,
@@ -64,7 +60,7 @@ export class ComputrabajoScraper {
           location,
           url: href,
           source: this.sourceName,
-          postedAt,
+          postedAt: detectedDate ? detectedDate.toISOString() : undefined,
         });
       });
     } catch (e: any) {

@@ -4,7 +4,7 @@ import { ConfigService } from '@nestjs/config';
 import { Job } from '../common/job.interface';
 import { SeenJobsStore } from '../common/seen-jobs.store';
 import { isRemoteJob, matchesLevel } from '../common/matching';
-import { isWithinHours } from '../common/date-parsing';
+import { passesRecencyFilter } from '../common/date-utils';
 import { TelegramService } from '../telegram/telegram.service';
 import { CvService } from '../cv/cv.service';
 import { RemoteOkScraper } from '../scrapers/remoteok.scraper';
@@ -26,7 +26,7 @@ export class JobsService {
   private readonly scrapers: Scraper[];
   private readonly enabledSources: Set<string>;
   private readonly keywords: string[];
-  private readonly maxAgeHours: number;
+  private readonly recencyHours: number;
   private running = false;
 
   constructor(
@@ -50,7 +50,8 @@ export class JobsService {
     );
     this.enabledSources = new Set(enabledEnv.split(',').map((s) => s.trim().toLowerCase()));
 
-    // Por defecto alineado al foco del prompt de referencia: fullstack/backend remoto.
+    // Estas KEYWORDS son la base compartida entre todos los usuarios. El
+    // "plus" de cada quien es su propio CV (ver passesAllFilters).
     this.keywords = this.config
       .get<string>(
         'KEYWORDS',
@@ -60,11 +61,9 @@ export class JobsService {
       .map((k) => k.trim().toLowerCase())
       .filter(Boolean);
 
-    this.maxAgeHours = Number(this.config.get<string>('MAX_JOB_AGE_HOURS', '24')) || 24;
+    this.recencyHours = this.config.get<number>('RECENCY_HOURS', 24);
   }
 
-  // Cada 30 minutos. Indeed/LinkedIn se dejan en el mismo intervalo que el
-  // resto para no arriesgar bloqueos por exceso de requests.
   @Cron('*/30 * * * *')
   async handleCron() {
     await this.runSearch();
@@ -77,43 +76,71 @@ export class JobsService {
     }
     this.running = true;
 
-    const cvSkills = this.cv.getSkills().map((s) => s.toLowerCase());
-    const selectedLevels = this.cv.getLevels();
+    const chatIds = this.telegram.getAuthorizedChatIds();
+    if (chatIds.length === 0) {
+      this.logger.warn('No hay usuarios autorizados (TELEGRAM_CHAT_IDS vacío). Nada que enviar.');
+      this.running = false;
+      return { found: 0, sent: 0 };
+    }
 
     let totalFound = 0;
     let totalSent = 0;
 
     try {
+      // 1) Se hace scraping UNA sola vez por ciclo, sin importar cuántos
+      // usuarios haya — así no se multiplica el riesgo de bloqueo por IP.
+      const allJobs: Job[] = [];
       for (const scraper of this.scrapers) {
         if (!this.enabledSources.has(scraper.sourceName)) continue;
 
         this.logger.log(`Buscando en ${scraper.sourceName}...`);
-        let jobs: Job[] = [];
         try {
-          jobs = await scraper.fetchJobs();
+          const jobs = await scraper.fetchJobs();
+          allJobs.push(...jobs);
+          totalFound += jobs.length;
+          this.logger.log(`${scraper.sourceName}: ${jobs.length} ofertas encontradas.`);
         } catch (e: any) {
           this.logger.error(`Error inesperado en ${scraper.sourceName}: ${e?.message}`);
-          continue;
-        }
-        totalFound += jobs.length;
-        this.logger.log(`${scraper.sourceName}: ${jobs.length} ofertas encontradas.`);
-
-        for (const job of jobs) {
-          if (this.seenJobsStore.has(job.id)) continue;
-          if (!this.passesAllFilters(job, cvSkills, selectedLevels)) continue;
-
-          const message = this.telegram.formatJobMessage(job);
-          const ok = await this.telegram.sendMessage(message);
-          if (ok) {
-            this.seenJobsStore.add(job.id);
-            totalSent += 1;
-            await this.sleep(1000); // evita saturar la API de Telegram
-          }
         }
       }
 
+      // 2) Cada usuario recibe solo lo que le aplica a SU perfil, y su
+      // propio historial de "ya visto" — independiente del resto.
+      for (const chatId of chatIds) {
+        const cvSkills = this.cv.getSkills(chatId).map((s) => s.toLowerCase());
+        const selectedLevels = this.cv.getLevels(chatId);
+
+        let passedFilter = 0;
+        let alreadySeen = 0;
+        let sentToThisUser = 0;
+
+        for (const job of allJobs) {
+          if (!this.passesAllFilters(job, cvSkills, selectedLevels)) continue;
+          passedFilter += 1;
+
+          if (this.seenJobsStore.has(chatId, job.id)) {
+            alreadySeen += 1;
+            continue;
+          }
+
+          const message = this.telegram.formatJobMessage(job);
+          const ok = await this.telegram.sendMessage(chatId, message);
+          if (ok) {
+            this.seenJobsStore.add(chatId, job.id);
+            totalSent += 1;
+            sentToThisUser += 1;
+            await this.sleep(1000); // evita saturar la API de Telegram
+          }
+        }
+
+        this.logger.log(
+          `[chat ${chatId}] de ${allJobs.length} ofertas: ${passedFilter} pasaron el filtro, ` +
+            `${alreadySeen} ya estaban vistas, ${sentToThisUser} se enviaron ahora.`,
+        );
+      }
+
       this.seenJobsStore.persist();
-      this.logger.log(`Listo. ${totalSent} ofertas nuevas enviadas a Telegram.`);
+      this.logger.log(`Listo. ${totalSent} ofertas nuevas enviadas en total (${chatIds.length} usuarios).`);
     } finally {
       this.running = false;
     }
@@ -121,18 +148,10 @@ export class JobsService {
     return { found: totalFound, sent: totalSent };
   }
 
-  /**
-   * Una oferta pasa si: fue publicada hace como máximo `maxAgeHours` (24h por
-   * defecto, configurable con MAX_JOB_AGE_HOURS), es remota, coincide su nivel
-   * (o no se detecta nivel), y además coincide con las palabras clave base O
-   * con alguna skill de tu CV. El "O" es intencional: el título de una oferta
-   * rara vez repite tu stack completo, así que basta con que aparezca una
-   * señal clara.
-   */
   private passesAllFilters(job: Job, cvSkills: string[], selectedLevels: string[]): boolean {
-    if (!isWithinHours(job.postedAt, this.maxAgeHours)) return false;
     if (!isRemoteJob(job.source, job.title, job.location)) return false;
     if (!matchesLevel(job.title, selectedLevels as any)) return false;
+    if (!passesRecencyFilter(job.postedAt, this.recencyHours)) return false;
 
     const title = job.title.toLowerCase();
     const matchesBaseKeywords = this.keywords.some((kw) => title.includes(kw));

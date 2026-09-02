@@ -3,7 +3,7 @@ import axios from 'axios';
 import * as cheerio from 'cheerio';
 import * as crypto from 'crypto';
 import { Job } from '../common/job.interface';
-import { parseRelativeDate } from '../common/date-parsing';
+import { extractRelativeDate } from '../common/date-utils';
 
 // NOTA: igual que Computrabajo/InfoJobs, esto es scraping de HTML público.
 // GetOnBoard no bloquea tan agresivo como Indeed/LinkedIn, pero si cambian su
@@ -41,9 +41,7 @@ export class GetOnBoardScraper {
 
         const fullUrl = href.startsWith('http') ? href : `https://www.getonbrd.com${href}`;
         const id = crypto.createHash('md5').update(fullUrl).digest('hex').slice(0, 12);
-
-        const dateText = card.find('[class*=date], time').first().text().trim();
-        const postedAt = parseRelativeDate(dateText) || parseRelativeDate(card.text());
+        const detectedDate = extractRelativeDate(card.text());
 
         jobs.push({
           id: `getonboard-${id}`,
@@ -52,7 +50,7 @@ export class GetOnBoardScraper {
           location,
           url: fullUrl,
           source: this.sourceName,
-          postedAt,
+          postedAt: detectedDate ? detectedDate.toISOString() : undefined,
         });
       });
     } catch (e: any) {

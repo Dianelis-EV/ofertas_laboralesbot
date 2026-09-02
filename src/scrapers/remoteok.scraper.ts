@@ -17,6 +17,12 @@ export class RemoteOkScraper {
 
       for (const item of data) {
         if (!item || typeof item !== 'object' || !item.id) continue;
+
+        // RemoteOK da "epoch" (segundos unix) o "date" (ISO). Se prioriza epoch.
+        let postedAt: string | undefined;
+        if (item.epoch) postedAt = new Date(item.epoch * 1000).toISOString();
+        else if (item.date) postedAt = new Date(item.date).toISOString();
+
         jobs.push({
           id: `remoteok-${item.id}`,
           title: item.position || 'Sin título',
@@ -24,7 +30,7 @@ export class RemoteOkScraper {
           location: item.location || 'Remoto',
           url: item.url || `https://remoteok.com/remote-jobs/${item.id}`,
           source: this.sourceName,
-          postedAt: item.date ? new Date(item.date) : undefined,
+          postedAt,
         });
       }
     } catch (e: any) {
