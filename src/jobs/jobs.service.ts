@@ -61,7 +61,7 @@ export class JobsService {
       .map((k) => k.trim().toLowerCase())
       .filter(Boolean);
 
-    this.recencyHours = this.config.get<number>('RECENCY_HOURS', 24);
+    this.recencyHours = this.config.get<number>('RECENCY_HOURS', 72);
   }
 
   @Cron('*/30 * * * *')
