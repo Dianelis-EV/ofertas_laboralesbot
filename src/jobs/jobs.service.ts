@@ -113,9 +113,14 @@ export class JobsService {
         let passedFilter = 0;
         let alreadySeen = 0;
         let sentToThisUser = 0;
+        const failReasons: Record<string, number> = { remote: 0, level: 0, recency: 0, keyword: 0 };
 
         for (const job of allJobs) {
-          if (!this.passesAllFilters(job, cvSkills, selectedLevels)) continue;
+          const diagnosis = this.diagnoseFilters(job, cvSkills, selectedLevels);
+          if (diagnosis !== 'pass') {
+            failReasons[diagnosis] += 1;
+            continue;
+          }
           passedFilter += 1;
 
           if (this.seenJobsStore.has(chatId, job.id)) {
@@ -135,7 +140,9 @@ export class JobsService {
 
         this.logger.log(
           `[chat ${chatId}] de ${allJobs.length} ofertas: ${passedFilter} pasaron el filtro, ` +
-            `${alreadySeen} ya estaban vistas, ${sentToThisUser} se enviaron ahora.`,
+            `${alreadySeen} ya estaban vistas, ${sentToThisUser} se enviaron ahora. ` +
+            `Descartadas por: remoto=${failReasons.remote}, nivel=${failReasons.level}, ` +
+            `recencia=${failReasons.recency}, keyword=${failReasons.keyword}.`,
         );
       }
 
@@ -148,16 +155,22 @@ export class JobsService {
     return { found: totalFound, sent: totalSent };
   }
 
-  private passesAllFilters(job: Job, cvSkills: string[], selectedLevels: string[]): boolean {
-    if (!isRemoteJob(job.source, job.title, job.location)) return false;
-    if (!matchesLevel(job.title, selectedLevels as any)) return false;
-    if (!passesRecencyFilter(job.postedAt, this.recencyHours)) return false;
+  /** Dice por cuál filtro cayó una oferta, o 'pass' si pasó todos (para diagnóstico). */
+  private diagnoseFilters(
+    job: Job,
+    cvSkills: string[],
+    selectedLevels: string[],
+  ): 'remote' | 'level' | 'recency' | 'keyword' | 'pass' {
+    if (!isRemoteJob(job.source, job.title, job.location)) return 'remote';
+    if (!matchesLevel(job.title, selectedLevels as any)) return 'level';
+    if (!passesRecencyFilter(job.postedAt, this.recencyHours)) return 'recency';
 
     const title = job.title.toLowerCase();
     const matchesBaseKeywords = this.keywords.some((kw) => title.includes(kw));
     const matchesCv = cvSkills.length > 0 && cvSkills.some((skill) => title.includes(skill));
+    if (!matchesBaseKeywords && !matchesCv) return 'keyword';
 
-    return matchesBaseKeywords || matchesCv;
+    return 'pass';
   }
 
   private sleep(ms: number): Promise<void> {
