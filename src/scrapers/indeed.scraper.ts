@@ -4,6 +4,7 @@ import axios from 'axios';
 import * as cheerio from 'cheerio';
 import * as crypto from 'crypto';
 import { Job } from '../common/job.interface';
+import { parseRelativeDate } from '../common/date-parsing';
 
 // NOTA: Indeed detecta y bloquea scraping muy agresivamente (Cloudflare/captchas).
 // Este scraper es "mejor esfuerzo": puede devolver 0 resultados o romperse en
@@ -58,6 +59,11 @@ export class IndeedScraper {
         const location = $(el).find('div.companyLocation').first().text().trim() || 'N/A';
         const id = crypto.createHash('md5').update(href).digest('hex').slice(0, 12);
 
+        const dateText =
+          $(el).find('span.date, [data-testid*="date"], span[class*="date"]').first().text().trim() ||
+          $(el).text();
+        const postedAt = parseRelativeDate(dateText);
+
         jobs.push({
           id: `indeed-${id}`,
           title,
@@ -65,6 +71,7 @@ export class IndeedScraper {
           location,
           url: href,
           source: this.sourceName,
+          postedAt,
         });
       });
     } catch (e: any) {

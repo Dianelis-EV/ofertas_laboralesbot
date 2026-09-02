@@ -4,6 +4,7 @@ import axios from 'axios';
 import * as cheerio from 'cheerio';
 import * as crypto from 'crypto';
 import { Job } from '../common/job.interface';
+import { parseRelativeDate } from '../common/date-parsing';
 
 @Injectable()
 export class InfoJobsScraper {
@@ -39,6 +40,9 @@ export class InfoJobsScraper {
         const location = $(el).find('[class*=location]').first().text().trim() || 'N/A';
         const id = crypto.createHash('md5').update(href).digest('hex').slice(0, 12);
 
+        const dateText = $(el).find('[data-testid="sincedate-tag"]').first().text().trim();
+        const postedAt = parseRelativeDate(dateText) || parseRelativeDate($(el).text());
+
         jobs.push({
           id: `infojobs-${id}`,
           title,
@@ -46,6 +50,7 @@ export class InfoJobsScraper {
           location,
           url: href,
           source: this.sourceName,
+          postedAt,
         });
       });
     } catch (e: any) {

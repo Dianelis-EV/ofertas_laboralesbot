@@ -5,4 +5,6 @@ export interface Job {
   location: string;
   url: string;
   source: string;
+  /** Fecha de publicación detectada (best-effort, no todos los portales la exponen). */
+  postedAt?: Date;
 }

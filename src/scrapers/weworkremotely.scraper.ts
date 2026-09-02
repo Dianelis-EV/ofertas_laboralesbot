@@ -34,6 +34,11 @@ export class WeWorkRemotelyScraper {
           location: 'Remoto',
           url: link,
           source: this.sourceName,
+          postedAt: entry.isoDate
+            ? new Date(entry.isoDate)
+            : entry.pubDate
+              ? new Date(entry.pubDate)
+              : undefined,
         });
       }
     } catch (e: any) {

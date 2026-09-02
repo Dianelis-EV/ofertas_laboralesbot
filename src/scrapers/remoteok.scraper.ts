@@ -24,6 +24,7 @@ export class RemoteOkScraper {
           location: item.location || 'Remoto',
           url: item.url || `https://remoteok.com/remote-jobs/${item.id}`,
           source: this.sourceName,
+          postedAt: item.date ? new Date(item.date) : undefined,
         });
       }
     } catch (e: any) {

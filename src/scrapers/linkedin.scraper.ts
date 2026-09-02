@@ -4,6 +4,7 @@ import axios from 'axios';
 import * as cheerio from 'cheerio';
 import * as crypto from 'crypto';
 import { Job } from '../common/job.interface';
+import { parseRelativeDate } from '../common/date-parsing';
 
 // NOTA: LinkedIn no ofrece API pública gratuita de empleos y puede limitar o
 // bloquear este endpoint "guest" sin aviso. Trátalo como opcional: si falla
@@ -46,6 +47,13 @@ export class LinkedinScraper {
         const location = $(el).find('span.job-search-card__location').first().text().trim() || 'N/A';
         const id = crypto.createHash('md5').update(href).digest('hex').slice(0, 12);
 
+        const timeTag = $(el)
+          .find('time.job-search-card__listdate, time.job-search-card__listdate--new')
+          .first();
+        const postedAt =
+          parseRelativeDate(timeTag.text().trim()) ||
+          (timeTag.attr('datetime') ? new Date(timeTag.attr('datetime') as string) : undefined);
+
         jobs.push({
           id: `linkedin-${id}`,
           title: titleTag.text().trim(),
@@ -53,6 +61,7 @@ export class LinkedinScraper {
           location,
           url: href,
           source: this.sourceName,
+          postedAt,
         });
       });
     } catch (e: any) {

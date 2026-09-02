@@ -4,6 +4,7 @@ import axios from 'axios';
 import * as cheerio from 'cheerio';
 import * as crypto from 'crypto';
 import { Job } from '../common/job.interface';
+import { parseRelativeDate } from '../common/date-parsing';
 
 const DOMAINS: Record<string, string> = {
   mx: 'www.computrabajo.com.mx',
@@ -47,6 +48,15 @@ export class ComputrabajoScraper {
         const location = $(el).find('p.fs13').first().text().trim() || country.toUpperCase();
         const id = crypto.createHash('md5').update(href).digest('hex').slice(0, 12);
 
+        let postedAt: Date | undefined;
+        $(el)
+          .find('p.fs13, span.fs13, time, .fc_aux')
+          .each((__, dateEl) => {
+            if (postedAt) return;
+            postedAt = parseRelativeDate($(dateEl).text().trim());
+          });
+        if (!postedAt) postedAt = parseRelativeDate($(el).text());
+
         jobs.push({
           id: `computrabajo-${id}`,
           title,
@@ -54,6 +64,7 @@ export class ComputrabajoScraper {
           location,
           url: href,
           source: this.sourceName,
+          postedAt,
         });
       });
     } catch (e: any) {

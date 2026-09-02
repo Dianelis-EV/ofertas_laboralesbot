@@ -56,7 +56,14 @@ Todo se controla por variables de entorno (`.env` en local, "Environment" en Ren
 
 - `KEYWORDS`: palabras separadas por coma que deben aparecer en el título.
 - `COUNTRY`: país para Computrabajo/Indeed.
-- `ENABLED_SOURCES`: qué portales están activos, separados por coma.
+- `ENABLED_SOURCES`: qué portales están activos, separados por coma
+  (`remoteok,weworkremotely,computrabajo,infojobs,indeed,linkedin,getonboard`).
+- `MAX_JOB_AGE_HOURS`: antigüedad máxima (en horas) de una oferta para
+  avisar por Telegram. Por defecto `24`. Cada portal muestra la fecha de
+  publicación distinto (texto relativo tipo "Hace 2 horas" o fecha ISO), así
+  que el bot la interpreta con "mejor esfuerzo"; si un portal cambia su HTML
+  y ya no se puede leer esa fecha, esa oferta se descarta (mejor omitir que
+  avisar de algo que podría ser viejo).
 
 ## 5. Subir tu CV y elegir nivel (nuevo)
 

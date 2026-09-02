@@ -4,6 +4,7 @@ import { ConfigService } from '@nestjs/config';
 import { Job } from '../common/job.interface';
 import { SeenJobsStore } from '../common/seen-jobs.store';
 import { isRemoteJob, matchesLevel } from '../common/matching';
+import { isWithinHours } from '../common/date-parsing';
 import { TelegramService } from '../telegram/telegram.service';
 import { CvService } from '../cv/cv.service';
 import { RemoteOkScraper } from '../scrapers/remoteok.scraper';
@@ -25,6 +26,7 @@ export class JobsService {
   private readonly scrapers: Scraper[];
   private readonly enabledSources: Set<string>;
   private readonly keywords: string[];
+  private readonly maxAgeHours: number;
   private running = false;
 
   constructor(
@@ -57,6 +59,8 @@ export class JobsService {
       .split(',')
       .map((k) => k.trim().toLowerCase())
       .filter(Boolean);
+
+    this.maxAgeHours = Number(this.config.get<string>('MAX_JOB_AGE_HOURS', '24')) || 24;
   }
 
   // Cada 30 minutos. Indeed/LinkedIn se dejan en el mismo intervalo que el
@@ -118,12 +122,15 @@ export class JobsService {
   }
 
   /**
-   * Una oferta pasa si: es remota, coincide su nivel (o no se detecta nivel),
-   * y además coincide con las palabras clave base O con alguna skill de tu CV.
-   * El "O" es intencional: el título de una oferta rara vez repite tu stack
-   * completo, así que basta con que aparezca una señal clara.
+   * Una oferta pasa si: fue publicada hace como máximo `maxAgeHours` (24h por
+   * defecto, configurable con MAX_JOB_AGE_HOURS), es remota, coincide su nivel
+   * (o no se detecta nivel), y además coincide con las palabras clave base O
+   * con alguna skill de tu CV. El "O" es intencional: el título de una oferta
+   * rara vez repite tu stack completo, así que basta con que aparezca una
+   * señal clara.
    */
   private passesAllFilters(job: Job, cvSkills: string[], selectedLevels: string[]): boolean {
+    if (!isWithinHours(job.postedAt, this.maxAgeHours)) return false;
     if (!isRemoteJob(job.source, job.title, job.location)) return false;
     if (!matchesLevel(job.title, selectedLevels as any)) return false;
 
